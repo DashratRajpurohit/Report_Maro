@@ -1,0 +1,1288 @@
+openapi: 3.1.0
+info:
+  title: Societal Innovation Portal API
+  version: 1.0.0
+  description: >
+    Canonical machine-readable contract for the SIH 2026 Societal Innovation Portal.
+    Human-facing notes, examples and socket events live in docs/API_CONTRACT.md.
+    Request/response shapes are generated from packages/shared-types (Zod) --
+    if the two disagree, packages/shared-types wins and this file is the bug.
+servers:
+  - url: http://localhost:4000
+    description: Local development
+  - url: https://report-maro-c8m1.onrender.com
+    description: Deployed demo
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Problems
+  - name: Organizations
+  - name: Uploads
+  - name: Assignments
+  - name: Proposals
+  - name: Projects
+  - name: Notifications
+  - name: Stats
+  - name: Internal
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness + dependency probe
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+        '503':
+          description: A required dependency is down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a CITIZEN, UNIVERSITY or INDUSTRY account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created and signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Exchange credentials for a token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate an expired access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New token pair (the old refresh token is revoked)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '204': { description: Logged out }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: The signed-in user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/PublicUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/problems:
+    get:
+      tags: [Problems]
+      summary: List problems (list view, map view, "my reports")
+      security: []
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { in: query, name: status, schema: { $ref: '#/components/schemas/ProblemStatus' } }
+        - { in: query, name: category, schema: { $ref: '#/components/schemas/ProblemCategory' } }
+        - { in: query, name: priority, schema: { $ref: '#/components/schemas/Priority' } }
+        - { in: query, name: district, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string, maxLength: 200 } }
+        - { in: query, name: mine, schema: { type: boolean }, description: Requires authentication }
+        - in: query
+          name: bbox
+          schema: { type: string }
+          example: '85.1,23.2,85.5,23.6'
+          description: minLng,minLat,maxLng,maxLat
+        - { in: query, name: sort, schema: { type: string, enum: [newest, oldest, priority], default: newest } }
+      responses:
+        '200':
+          description: Paginated problem summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProblemSummary' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+    post:
+      tags: [Problems]
+      summary: Submit a problem (CITIZEN)
+      description: >
+        Persists the problem with status SUBMITTED, enqueues an analyze-problem
+        job and returns immediately. The AI result arrives later over Socket.io.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProblemRequest' }
+      responses:
+        '201':
+          description: Accepted for analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Problem' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/problems/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Problems]
+      summary: Problem detail including AI analysis
+      security: []
+      responses:
+        '200':
+          description: Problem
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/problems/{id}/status:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    patch:
+      tags: [Problems]
+      summary: Override problem status (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/ProblemStatus' }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Updated problem
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Problem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/organizations:
+    get:
+      tags: [Organizations]
+      summary: Universities and industries (admin assign dropdown, signup picker)
+      security: []
+      parameters:
+        - { in: query, name: type, schema: { type: string, enum: [UNIVERSITY, INDUSTRY, GOVERNMENT] } }
+        - { in: query, name: district, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated organizations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Organization' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+
+  /api/v1/uploads/presign:
+    post:
+      tags: [Uploads]
+      summary: Presigned PUT for a problem photo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType, sizeBytes]
+              properties:
+                fileName: { type: string }
+                contentType: { type: string, enum: [image/jpeg, image/png, image/webp, image/heic] }
+                sizeBytes: { type: integer, maximum: 8388608 }
+      responses:
+        '201':
+          description: Upload target
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/PresignUploadResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '413': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/assignments:
+    get:
+      tags: [Assignments]
+      summary: List assignments (ADMIN sees all, UNIVERSITY sees its own)
+      parameters:
+        - { in: query, name: status, schema: { $ref: '#/components/schemas/AssignmentStatus' } }
+        - { in: query, name: universityId, schema: { type: string } }
+        - { in: query, name: problemId, schema: { type: string } }
+        - { in: query, name: mine, schema: { type: boolean } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Assignment' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+    post:
+      tags: [Assignments]
+      summary: Assign a problem to a university (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [problemId, universityId]
+              properties:
+                problemId: { type: string }
+                universityId: { type: string }
+                note: { type: string, maxLength: 1000 }
+                dueDate: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Assignment created; problem moves to ASSIGNED
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Assignment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/assignments/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Assignments]
+      summary: Assignment detail
+      responses:
+        '200':
+          description: Assignment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Assignment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Assignments]
+      summary: Accept, decline or complete an assignment (UNIVERSITY)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACCEPTED, DECLINED, COMPLETED] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Updated assignment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Assignment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/proposals:
+    get:
+      tags: [Proposals]
+      summary: List proposals
+      parameters:
+        - { in: query, name: status, schema: { $ref: '#/components/schemas/ProposalStatus' } }
+        - { in: query, name: assignmentId, schema: { type: string } }
+        - { in: query, name: universityId, schema: { type: string } }
+        - { in: query, name: mine, schema: { type: boolean } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Proposal' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+    post:
+      tags: [Proposals]
+      summary: Submit a proposal for an accepted assignment (UNIVERSITY)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProposalRequest' }
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Proposal' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/proposals/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Proposals]
+      summary: Proposal detail
+      responses:
+        '200':
+          description: Proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Proposal' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Proposals]
+      summary: Edit a DRAFT or submit it (UNIVERSITY, owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                summary: { type: string }
+                approach: { type: string }
+                teamMembers:
+                  type: array
+                  items: { $ref: '#/components/schemas/TeamMember' }
+                budgetInr: { type: integer }
+                timelineWeeks: { type: integer }
+                status: { type: string, enum: [DRAFT, SUBMITTED] }
+      responses:
+        '200':
+          description: Updated proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Proposal' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/proposals/{id}/review:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    patch:
+      tags: [Proposals]
+      summary: Approve or reject a proposal (ADMIN)
+      description: Approving creates a Project in AWAITING_FUNDING and notifies industries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [APPROVED, REJECTED] }
+                reviewNote: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: Reviewed proposal (projectId set when approved)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Proposal' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: Fundable projects (industry portal)
+      security: []
+      parameters:
+        - { in: query, name: status, schema: { $ref: '#/components/schemas/ProjectStatus' } }
+        - { in: query, name: category, schema: { $ref: '#/components/schemas/ProblemCategory' } }
+        - { in: query, name: universityId, schema: { type: string } }
+        - { in: query, name: fundedByMe, schema: { type: boolean } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated project summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProjectSummary' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+
+  /api/v1/projects/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Projects]
+      summary: Project detail with funding ledger
+      security: []
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/status:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    patch:
+      tags: [Projects]
+      summary: Advance or cancel a project (UNIVERSITY owner or ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, COMPLETED, CANCELLED] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/projects/{id}/fundings:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Projects]
+      summary: Funding ledger for a project
+      security: []
+      responses:
+        '200':
+          description: Fundings, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Funding' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+    post:
+      tags: [Projects]
+      summary: Pledge funding (INDUSTRY)
+      description: >
+        When the ledger total reaches budgetInr the project flips to ACTIVE and
+        the linked problem to IN_PROGRESS. Over-funding beyond the budget is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountInr]
+              properties:
+                amountInr: { type: integer, minimum: 1 }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Project after the pledge was applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: The caller's notification feed
+      parameters:
+        - { in: query, name: unreadOnly, schema: { type: boolean } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+
+  /api/v1/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Unread badge count
+      responses:
+        '200':
+          description: Count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    properties:
+                      unread: { type: integer }
+
+  /api/v1/notifications/{id}/read:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Notifications]
+      summary: Mark one notification read
+      responses:
+        '200':
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/Notification' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark every notification read
+      responses:
+        '200':
+          description: Remaining unread count (always 0)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    properties:
+                      unread: { type: integer }
+
+  /api/v1/stats/overview:
+    get:
+      tags: [Stats]
+      summary: Dashboard aggregates (ADMIN)
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/StatsOverview' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/internal/problems/search-similar:
+    post:
+      tags: [Internal]
+      summary: pgvector nearest-neighbour lookup for dedupe
+      security:
+        - internalKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [embedding]
+              properties:
+                embedding:
+                  type: array
+                  items: { type: number }
+                  minItems: 384
+                  maxItems: 384
+                excludeProblemId: { type: string }
+                district: { type: string }
+                limit: { type: integer, maximum: 20, default: 5 }
+                minScore: { type: number, default: 0.8 }
+      responses:
+        '200':
+          description: Candidate duplicates ordered by descending cosine similarity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    properties:
+                      candidates:
+                        type: array
+                        items: { $ref: '#/components/schemas/SimilarityCandidate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/internal/problems/{id}/analysis:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Internal]
+      summary: Write AI results back (idempotent)
+      security:
+        - internalKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnalysisCallbackRequest' }
+      responses:
+        '200':
+          description: Applied (or replayed, with applied=false)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    properties:
+                      problemId: { type: string }
+                      status: { $ref: '#/components/schemas/ProblemStatus' }
+                      applied: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/internal/problems/{id}/failure:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Internal]
+      summary: Report a permanently failed analysis
+      description: Called after BullMQ exhausts retries so the problem does not sit in PROCESSING forever.
+      security:
+        - internalKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, attempts]
+              properties:
+                reason: { type: string }
+                attempts: { type: integer }
+                stack: { type: string }
+      responses:
+        '202': { description: Recorded; problem returned to SUBMITTED for manual triage }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalKey:
+      type: apiKey
+      in: header
+      name: x-internal-key
+
+  responses:
+    ValidationError:
+      description: Request failed Zod validation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: Authenticated but the role is not allowed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: No such resource
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: Illegal state transition or duplicate
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+  schemas:
+    ApiError:
+      type: object
+      required: [success, error, requestId]
+      properties:
+        success: { const: false }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SERVICE_UNAVAILABLE]
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  path: { type: string }
+                  message: { type: string }
+        requestId: { type: string }
+
+    ListMeta:
+      type: object
+      properties:
+        pagination:
+          type: object
+          required: [page, pageSize, total, totalPages]
+          properties:
+            page: { type: integer }
+            pageSize: { type: integer }
+            total: { type: integer }
+            totalPages: { type: integer }
+
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        uptimeSeconds: { type: number }
+        version: { type: string }
+        dependencies:
+          type: object
+          properties:
+            postgres: { type: string, enum: [up, down] }
+            redis: { type: string, enum: [up, down] }
+            mongo: { type: string, enum: [up, down, disabled] }
+
+    UserRole: { type: string, enum: [CITIZEN, ADMIN, UNIVERSITY, INDUSTRY] }
+    ProblemCategory:
+      type: string
+      enum: [WATER_SANITATION, ROADS_TRANSPORT, EDUCATION, HEALTHCARE, ELECTRICITY, WASTE_MANAGEMENT, AGRICULTURE, PUBLIC_SAFETY, OTHER]
+    Priority: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    ProblemStatus:
+      type: string
+      enum: [SUBMITTED, PROCESSING, TRIAGED, DUPLICATE, ASSIGNED, IN_PROGRESS, RESOLVED, REJECTED]
+    AssignmentStatus: { type: string, enum: [PENDING, ACCEPTED, DECLINED, COMPLETED] }
+    ProposalStatus: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED] }
+    ProjectStatus: { type: string, enum: [AWAITING_FUNDING, ACTIVE, COMPLETED, CANCELLED] }
+
+    OrganizationSummary:
+      type: object
+      required: [id, name, type, district]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [UNIVERSITY, INDUSTRY, GOVERNMENT] }
+        district: { type: [string, 'null'] }
+
+    Organization:
+      allOf:
+        - $ref: '#/components/schemas/OrganizationSummary'
+        - type: object
+          properties:
+            contactEmail: { type: [string, 'null'] }
+            website: { type: [string, 'null'] }
+            activeAssignments: { type: integer }
+            createdAt: { type: string, format: date-time }
+
+    PublicUser:
+      type: object
+      required: [id, email, name, role, phone, organization, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/UserRole' }
+        phone: { type: [string, 'null'] }
+        organization:
+          oneOf:
+            - $ref: '#/components/schemas/OrganizationSummary'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        name: { type: string, minLength: 2 }
+        phone: { type: string }
+        role: { type: string, enum: [CITIZEN, UNIVERSITY, INDUSTRY], default: CITIZEN }
+        organizationId: { type: string, description: Required for UNIVERSITY and INDUSTRY }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    AuthEnvelope:
+      type: object
+      properties:
+        success: { const: true }
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/PublicUser' }
+            tokens:
+              type: object
+              properties:
+                accessToken: { type: string }
+                refreshToken: { type: string }
+                expiresIn: { type: integer }
+
+    Location:
+      type: object
+      required: [latitude, longitude, district]
+      properties:
+        latitude: { type: number, minimum: 21.5, maximum: 25.6 }
+        longitude: { type: number, minimum: 83.2, maximum: 88.0 }
+        district: { type: string }
+        address: { type: string }
+
+    Photo:
+      type: object
+      required: [key, url]
+      properties:
+        key: { type: string }
+        url: { type: string, format: uri }
+
+    ProblemAnalysis:
+      type: object
+      required: [category, categoryConfidence, priority, priorityScore, keywords, duplicateOfId, similarityScore, model, analyzedAt]
+      properties:
+        category: { $ref: '#/components/schemas/ProblemCategory' }
+        categoryConfidence: { type: number, minimum: 0, maximum: 1 }
+        priority: { $ref: '#/components/schemas/Priority' }
+        priorityScore: { type: number, minimum: 0, maximum: 100 }
+        keywords: { type: array, items: { type: string } }
+        duplicateOfId: { type: [string, 'null'] }
+        similarityScore: { type: [number, 'null'] }
+        model: { type: string }
+        analyzedAt: { type: string, format: date-time }
+
+    ProblemSummary:
+      type: object
+      required: [id, title, status, location, reporter, category, priority, duplicateCount, assignmentId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/ProblemStatus' }
+        location: { $ref: '#/components/schemas/Location' }
+        reporter:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+        category:
+          oneOf:
+            - $ref: '#/components/schemas/ProblemCategory'
+            - type: 'null'
+        priority:
+          oneOf:
+            - $ref: '#/components/schemas/Priority'
+            - type: 'null'
+        duplicateCount: { type: integer }
+        assignmentId: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Problem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemSummary'
+        - type: object
+          required: [description, photos, analysis]
+          properties:
+            description: { type: string }
+            photos: { type: array, items: { $ref: '#/components/schemas/Photo' } }
+            analysis:
+              oneOf:
+                - $ref: '#/components/schemas/ProblemAnalysis'
+                - type: 'null'
+
+    CreateProblemRequest:
+      type: object
+      required: [title, description, location]
+      properties:
+        title: { type: string, minLength: 10, maxLength: 160 }
+        description: { type: string, minLength: 30, maxLength: 4000 }
+        location: { $ref: '#/components/schemas/Location' }
+        photos: { type: array, maxItems: 5, items: { $ref: '#/components/schemas/Photo' } }
+        suggestedCategory: { $ref: '#/components/schemas/ProblemCategory' }
+
+    PresignUploadResponse:
+      type: object
+      properties:
+        key: { type: string }
+        uploadUrl: { type: string, format: uri }
+        publicUrl: { type: string, format: uri }
+        expiresIn: { type: integer }
+
+    Assignment:
+      type: object
+      required: [id, problemId, problem, university, status, note, dueDate, assignedBy, respondedAt, proposalId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        problemId: { type: string }
+        problem: { $ref: '#/components/schemas/ProblemSummary' }
+        university: { $ref: '#/components/schemas/OrganizationSummary' }
+        status: { $ref: '#/components/schemas/AssignmentStatus' }
+        note: { type: [string, 'null'] }
+        dueDate: { type: [string, 'null'], format: date-time }
+        assignedBy:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+        respondedAt: { type: [string, 'null'], format: date-time }
+        proposalId: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    TeamMember:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string }
+        role: { type: string }
+        email: { type: string, format: email }
+
+    Proposal:
+      type: object
+      required: [id, assignmentId, problem, university, title, summary, approach, teamMembers, budgetInr, timelineWeeks, status, reviewNote, reviewedAt, projectId, submittedBy, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        assignmentId: { type: string }
+        problem: { $ref: '#/components/schemas/ProblemSummary' }
+        university: { $ref: '#/components/schemas/OrganizationSummary' }
+        title: { type: string }
+        summary: { type: string }
+        approach: { type: string }
+        teamMembers: { type: array, items: { $ref: '#/components/schemas/TeamMember' } }
+        budgetInr: { type: integer }
+        timelineWeeks: { type: integer }
+        status: { $ref: '#/components/schemas/ProposalStatus' }
+        reviewNote: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        projectId: { type: [string, 'null'] }
+        submittedBy:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateProposalRequest:
+      type: object
+      required: [assignmentId, title, summary, approach, teamMembers, budgetInr, timelineWeeks]
+      properties:
+        assignmentId: { type: string }
+        title: { type: string, minLength: 10 }
+        summary: { type: string, minLength: 50 }
+        approach: { type: string, minLength: 50 }
+        teamMembers: { type: array, minItems: 1, items: { $ref: '#/components/schemas/TeamMember' } }
+        budgetInr: { type: integer, minimum: 0 }
+        timelineWeeks: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, SUBMITTED], default: SUBMITTED }
+
+    Funding:
+      type: object
+      required: [id, projectId, industry, amountInr, note, fundedBy, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        industry: { $ref: '#/components/schemas/OrganizationSummary' }
+        amountInr: { type: integer }
+        note: { type: [string, 'null'] }
+        fundedBy:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ProjectSummary:
+      type: object
+      required: [id, proposalId, problem, university, title, category, status, budgetInr, fundedInr, fundedPercent, timelineWeeks, startedAt, completedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        proposalId: { type: string }
+        problem: { $ref: '#/components/schemas/ProblemSummary' }
+        university: { $ref: '#/components/schemas/OrganizationSummary' }
+        title: { type: string }
+        category:
+          oneOf:
+            - $ref: '#/components/schemas/ProblemCategory'
+            - type: 'null'
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        budgetInr: { type: integer }
+        fundedInr: { type: integer }
+        fundedPercent: { type: number }
+        timelineWeeks: { type: integer }
+        startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Project:
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          required: [summary, fundings]
+          properties:
+            summary: { type: string }
+            fundings: { type: array, items: { $ref: '#/components/schemas/Funding' } }
+
+    Notification:
+      type: object
+      required: [id, type, title, body, link, readAt, createdAt]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [PROBLEM_ANALYZED, PROBLEM_ASSIGNED, PROBLEM_STATUS_CHANGED, PROPOSAL_SUBMITTED, PROPOSAL_REVIEWED, PROJECT_FUNDED]
+        title: { type: string }
+        body: { type: string }
+        link: { type: [string, 'null'] }
+        readAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    StatsOverview:
+      type: object
+      properties:
+        totals:
+          type: object
+          properties:
+            problems: { type: integer }
+            problemsToday: { type: integer }
+            pendingTriage: { type: integer }
+            assigned: { type: integer }
+            resolved: { type: integer }
+            duplicates: { type: integer }
+            activeProjects: { type: integer }
+            fundedInr: { type: integer }
+        byCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { $ref: '#/components/schemas/ProblemCategory' }
+              count: { type: integer }
+        byStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { $ref: '#/components/schemas/ProblemStatus' }
+              count: { type: integer }
+        byPriority:
+          type: array
+          items:
+            type: object
+            properties:
+              priority: { $ref: '#/components/schemas/Priority' }
+              count: { type: integer }
+        byDistrict:
+          type: array
+          items:
+            type: object
+            properties:
+              district: { type: string }
+              count: { type: integer }
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              count: { type: integer }
+
+    SimilarityCandidate:
+      type: object
+      properties:
+        problemId: { type: string }
+        title: { type: string }
+        score: { type: number }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AnalysisCallbackRequest:
+      type: object
+      required: [category, categoryConfidence, priority, priorityScore, embedding, model, processingMs]
+      properties:
+        category: { $ref: '#/components/schemas/ProblemCategory' }
+        categoryConfidence: { type: number, minimum: 0, maximum: 1 }
+        priority: { $ref: '#/components/schemas/Priority' }
+        priorityScore: { type: number, minimum: 0, maximum: 100 }
+        keywords: { type: array, items: { type: string } }
+        embedding:
+          type: array
+          items: { type: number }
+          minItems: 384
+          maxItems: 384
+        duplicateOfId: { type: [string, 'null'] }
+        similarityScore: { type: [number, 'null'] }
+        model: { type: string }
+        processingMs: { type: integer }

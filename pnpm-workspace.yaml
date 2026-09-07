@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# sharp is a transitive, image-preprocessing-only dependency of
+# @xenova/transformers (apps/ai-worker) that we never call — its native build
+# needs a libvips binary download that isn't reachable in some sandboxed CI
+# environments. Skipping the build script is safe: text-embedding calls never
+# touch sharp's code path.
+neverBuiltDependencies:
+  - sharp

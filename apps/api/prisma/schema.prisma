@@ -1,0 +1,271 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// -------------------------------------------------------------------------
+// Enums mirror packages/shared-types/src/enums.ts exactly. If you change a
+// value here, update the Zod enum too — see docs/API_CONTRACT.md.
+// -------------------------------------------------------------------------
+
+enum UserRole {
+  CITIZEN
+  ADMIN
+  UNIVERSITY
+  INDUSTRY
+}
+
+enum OrganizationType {
+  UNIVERSITY
+  INDUSTRY
+  GOVERNMENT
+}
+
+enum ProblemCategory {
+  WATER_SANITATION
+  ROADS_TRANSPORT
+  EDUCATION
+  HEALTHCARE
+  ELECTRICITY
+  WASTE_MANAGEMENT
+  AGRICULTURE
+  PUBLIC_SAFETY
+  OTHER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ProblemStatus {
+  SUBMITTED
+  PROCESSING
+  TRIAGED
+  DUPLICATE
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  COMPLETED
+}
+
+enum ProposalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum ProjectStatus {
+  AWAITING_FUNDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  PROBLEM_ANALYZED
+  PROBLEM_ASSIGNED
+  PROBLEM_STATUS_CHANGED
+  PROPOSAL_SUBMITTED
+  PROPOSAL_REVIEWED
+  PROJECT_FUNDED
+}
+
+model Organization {
+  id           String           @id @default(cuid())
+  name         String
+  type         OrganizationType
+  district     String?
+  contactEmail String?
+  website      String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  users       User[]
+  assignments Assignment[]
+  fundings    Funding[]
+
+  @@index([type])
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  name           String
+  phone          String?
+  role           UserRole @default(CITIZEN)
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization?  @relation(fields: [organizationId], references: [id])
+  problems       Problem[]      @relation("ProblemReporter")
+  assignmentsMade Assignment[]  @relation("AssignmentAssignedBy")
+  proposalsMade  Proposal[]     @relation("ProposalSubmittedBy")
+  fundingsMade   Funding[]      @relation("FundingFundedBy")
+  notifications  Notification[]
+  refreshTokens  RefreshToken[]
+
+  @@index([role])
+  @@index([organizationId])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Problem {
+  id                 String          @id @default(cuid())
+  title              String
+  description        String
+  latitude           Float
+  longitude          Float
+  district           String
+  address            String?
+  photos             Json            @default("[]")
+  status             ProblemStatus   @default(SUBMITTED)
+  category           ProblemCategory?
+  categoryConfidence Float?
+  priority           Priority?
+  priorityScore      Float?
+  keywords           String[]        @default([])
+  duplicateOfId      String?
+  similarityScore    Float?
+  analysisModel      String?
+  analyzedAt         DateTime?
+  // pgvector column — Prisma has no native vector type, so it's added and
+  // maintained via raw SQL migrations (see prisma/migrations). Never write
+  // to it through a generated Prisma Client call; use $executeRaw.
+  reporterId         String
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  reporter     User          @relation("ProblemReporter", fields: [reporterId], references: [id])
+  duplicateOf  Problem?      @relation("ProblemDuplicates", fields: [duplicateOfId], references: [id])
+  duplicates   Problem[]     @relation("ProblemDuplicates")
+  assignment   Assignment?
+
+  @@index([status])
+  @@index([category])
+  @@index([district])
+  @@index([reporterId])
+  @@index([priority])
+}
+
+model Assignment {
+  id           String           @id @default(cuid())
+  problemId    String           @unique
+  universityId String
+  status       AssignmentStatus @default(PENDING)
+  note         String?
+  dueDate      DateTime?
+  assignedById String
+  respondedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  problem    Problem      @relation(fields: [problemId], references: [id])
+  university Organization @relation(fields: [universityId], references: [id])
+  assignedBy User         @relation("AssignmentAssignedBy", fields: [assignedById], references: [id])
+  proposal   Proposal?
+
+  @@index([status])
+  @@index([universityId])
+}
+
+model Proposal {
+  id           String         @id @default(cuid())
+  assignmentId String         @unique
+  title        String
+  summary      String
+  approach     String
+  teamMembers  Json
+  budgetInr    Int
+  timelineWeeks Int
+  status       ProposalStatus @default(SUBMITTED)
+  reviewNote   String?
+  reviewedAt   DateTime?
+  submittedById String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  assignment  Assignment @relation(fields: [assignmentId], references: [id])
+  submittedBy User       @relation("ProposalSubmittedBy", fields: [submittedById], references: [id])
+  project     Project?
+
+  @@index([status])
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  proposalId    String        @unique
+  status        ProjectStatus @default(AWAITING_FUNDING)
+  budgetInr     Int
+  timelineWeeks Int
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  proposal Proposal  @relation(fields: [proposalId], references: [id])
+  fundings Funding[]
+
+  @@index([status])
+}
+
+model Funding {
+  id             String   @id @default(cuid())
+  projectId      String
+  industryId     String
+  amountInr      Int
+  note           String?
+  fundedById     String
+  createdAt      DateTime @default(now())
+
+  project    Project      @relation(fields: [projectId], references: [id])
+  industry   Organization @relation(fields: [industryId], references: [id])
+  fundedBy   User         @relation("FundingFundedBy", fields: [fundedById], references: [id])
+
+  @@index([projectId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
