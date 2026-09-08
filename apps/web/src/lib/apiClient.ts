@@ -2,8 +2,15 @@ import axios from 'axios';
 import type { ApiErrorResponse } from '@sih/shared-types';
 import { useAuthStore } from '../store/authStore.js';
 
+/**
+ * Falls back to the same default the MSW handlers use (mocks/handlers.ts) so
+ * dev/test environments without a committed .env still line up — see
+ * CONTRIBUTING.md's env setup step for why .env is never committed.
+ */
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1';
+
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: API_BASE_URL,
 });
 
 apiClient.interceptors.request.use((config) => {

@@ -56,7 +56,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: cp apps/api/.env.example apps/api/.env
       - run: pnpm --filter @sih/shared-types build
+      - name: Generate Prisma client (apps/api has no committed dist for it)
+        run: pnpm --filter api db:generate
       - run: pnpm typecheck
 
   # One job per app so a frontend-only PR isn't gated on the AI worker (or vice versa).
@@ -78,9 +81,15 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Copy .env.example -> .env (dummy dev values only, never committed)
+        run: cp apps/${{ matrix.app }}/.env.example apps/${{ matrix.app }}/.env
+        if: matrix.app == 'api' || matrix.app == 'ai-worker' || matrix.app == 'web'
       - name: Build shared-types (dependency of every app)
         if: matrix.app != 'shared-types'
         run: pnpm --filter @sih/shared-types build
+      - name: Generate Prisma client
+        if: matrix.app == 'api'
+        run: pnpm --filter api db:generate
       - name: Test
         run: pnpm --filter ${{ matrix.app == 'shared-types' && '@sih/shared-types' || matrix.app }} test
       - name: Build
