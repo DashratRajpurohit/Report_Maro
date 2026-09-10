@@ -8,6 +8,7 @@ propose solutions, and industries fund them.
 - API contract: [docs/API_CONTRACT.md](./docs/API_CONTRACT.md).
 - Open tickets: [docs/TASK_BREAKDOWN.md](./docs/TASK_BREAKDOWN.md).
 - Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Working on the AI worker integration? Start with [docs/AI_WORKER_HANDOFF.md](./docs/AI_WORKER_HANDOFF.md) — it has a security notice you need to read first.
 
 ## 🌐 Live Links
 
