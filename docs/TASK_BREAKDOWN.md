@@ -36,7 +36,7 @@ current contract and docs/ARCHITECTURE.md for why it's shaped this way.
       before the problem is marked `verified` (today, `confidence` is
       always hardcoded to `0.85`).
 
-## Frontend (owns `apps/web`)
+## Frontend (owns `frontend`)
 
 - [ ] Photo upload: wire the file picker in `SubmitProblem.tsx` to send
       `multipart/form-data` — `backend/src/controllers/problem.controller.js`
@@ -53,6 +53,6 @@ current contract and docs/ARCHITECTURE.md for why it's shaped this way.
 ## Cross-cutting
 
 - [ ] Any change to an endpoint's request/response shape must update
-      `docs/API_CONTRACT.md` and `packages/shared-types` in the same PR.
+      `docs/API_CONTRACT.md` and `frontend/src/schemas` in the same PR.
 - [ ] `backend/`'s `npm test` is currently a stub that always exits 1 —
       replace with real tests (Jest/Vitest) rather than leaving it failing.

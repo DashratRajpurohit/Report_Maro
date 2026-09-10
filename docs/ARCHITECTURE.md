@@ -13,9 +13,9 @@ Report_Maro/
 │                     API (docs/API_CONTRACT.md). New in this PR.
 ├── packages/
 │   ├── shared-types/ Zod schemas mirroring backend/'s actual Mongoose
-│   │                 shapes and response envelopes. Consumed by apps/web
+│   │                 shapes and response envelopes. Consumed by frontend
 │   │                 only — backend/ stays plain JS, untouched.
-│   └── config/       Shared eslint/tsconfig bases for apps/web + packages/*.
+│   └── config/       Shared eslint/tsconfig bases for frontend + frontend/src/schemas.
 ├── infra/
 │   └── docker-compose.yml   Mongo + Redis (matches backend/'s actual deps).
 └── docs/             This folder.
@@ -48,10 +48,10 @@ takes `backend/` as the given foundation and builds on top of it:
      instance or called `app.set('io', io)`, so every one of those emits was
      a silent no-op. This wiring makes already-written code actually run;
      it adds no new real-time behavior of its own.
-- **`apps/web` is new** and matches `backend/`'s real field names (`full_name`,
+- **`frontend` is new** and matches `backend/`'s real field names (`full_name`,
   `_id`, `location.lat`/`lng`, lowercase enums like `citizen`/`water`/`high`)
   rather than an idealized contract — see docs/API_CONTRACT.md.
-- **`packages/shared-types`** exists only so `apps/web` gets compile-time
+- **`frontend/src/schemas`** exists only so `frontend` gets compile-time
   safety against that real contract. `backend/` does not depend on it and
   stays CommonJS/plain JS, per PRs #4–#9's existing convention.
 
@@ -68,7 +68,7 @@ fix (default/lazy-init) as a follow-up.
 ## Local development
 
 ```bash
-pnpm install                     # apps/web + packages/* (pnpm workspace)
+pnpm install                     # frontend + frontend/src/schemas (pnpm workspace)
 cd backend && npm install        # backend/ (separate, npm-managed)
 
 docker compose -f infra/docker-compose.yml up -d   # Mongo + Redis
@@ -78,6 +78,6 @@ cd backend && cp .env.example .env  # fill in JWT_SECRET, MONGODB_URI, REDIS_URI
 npm run dev
 
 # Terminal 2
-cd apps/web && cp .env.example .env
+cd frontend && cp .env.example .env
 pnpm dev
 ```

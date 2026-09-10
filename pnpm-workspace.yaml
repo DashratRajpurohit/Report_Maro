@@ -1,6 +1,0 @@
-# backend/ is intentionally NOT a workspace member — it's Amrit's existing
-# npm-managed Express+Mongoose service (PRs #4-#9). This workspace covers
-# only the pieces added on top of it: the web frontend and its shared types.
-packages:
-  - "apps/*"
-  - "packages/*"

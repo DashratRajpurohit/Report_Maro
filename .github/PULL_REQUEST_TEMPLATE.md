@@ -4,8 +4,8 @@
 
 ## API contract updated? (Y/N)
 
-If Y, confirm `docs/API_CONTRACT.md` and `packages/shared-types` (if
-`apps/web` is affected) were updated in this PR.
+If Y, confirm `docs/API_CONTRACT.md` and `frontend/src/schemas` (if
+`frontend` is affected) were updated in this PR.
 
 ## Screenshots (for frontend changes)
 

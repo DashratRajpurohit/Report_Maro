@@ -2,8 +2,8 @@
 
 This documents `backend/`'s **actual, currently-implemented** API (PRs #4–#9
 by Amrit-raj50), plus three small additive endpoints added alongside
-`apps/web` in this PR. It is the source of truth `apps/web` and
-`packages/shared-types` are built against — if this doc and the code
+`frontend` in this PR. It is the source of truth `frontend` and
+`frontend/src/schemas` are built against — if this doc and the code
 disagree, the code wins and this doc is out of date; please fix it.
 
 Base URL: `http://localhost:3000` locally. All routes below are prefixed
@@ -12,8 +12,8 @@ with `/api` except `/health`.
 Every response is JSON with a `success: boolean` field. Most error
 responses look like `{ success: false, message: "..." }`; uncaught errors
 (via `middleware/errorHandler.middleware.js`) look like
-`{ success: false, error: { code, message } }`. `apps/web`'s
-`apiErrorMessage()` helper (`apps/web/src/lib/apiClient.ts`) unwraps both.
+`{ success: false, error: { code, message } }`. `frontend`'s
+`apiErrorMessage()` helper (`frontend/src/lib/apiClient.ts`) unwraps both.
 
 ## Auth (`backend/src/routes/auth.route.js`)
 

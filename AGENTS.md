@@ -12,10 +12,10 @@ universities, universities propose solutions, and industries fund them.
 backend/          Express + MongoDB API (Amrit-raj50, PRs #4-#9). Own npm
                    project, not part of the pnpm workspace. See below before
                    touching anything in here.
-apps/web/          React + Vite frontend, built against backend/'s real API.
+frontend/          React + Vite frontend, built against backend/'s real API.
 packages/
   shared-types/    Zod schemas mirroring backend/'s actual response shapes.
-                   Consumed by apps/web only.
+                   Consumed by frontend only.
   config/          Shared eslint/tsconfig bases.
 infra/             docker-compose.yml (Mongo + Redis).
 docs/              API_CONTRACT.md, ARCHITECTURE.md, TASK_BREAKDOWN.md.
@@ -24,7 +24,7 @@ docs/              API_CONTRACT.md, ARCHITECTURE.md, TASK_BREAKDOWN.md.
 ## Setup commands
 
 ```bash
-pnpm install                                        # apps/web + packages/*
+pnpm install                                        # frontend + frontend/src/schemas
 cd backend && npm install && cp .env.example .env    # backend/ is separate
 docker compose -f infra/docker-compose.yml up -d     # Mongo + Redis
 ```
@@ -42,15 +42,15 @@ pnpm --filter web dev         # frontend, port 5173
   Mongoose. Don't introduce TypeScript, Prisma, or a different ORM there.
   Add new files/exports rather than rewriting existing ones — see
   docs/ARCHITECTURE.md's "why this shape" for the reasoning.
-- **`apps/web`**: TypeScript strict mode, ESLint + Prettier from
-  `packages/config`, no `any`, Zod-validated forms using
-  `packages/shared-types`.
+- **`frontend`**: TypeScript strict mode, ESLint + Prettier from
+  `frontend`, no `any`, Zod-validated forms using
+  `frontend/src/schemas`.
 - Any endpoint change updates `docs/API_CONTRACT.md` and
-  `packages/shared-types` in the same PR.
+  `frontend/src/schemas` in the same PR.
 
 ## Testing
 
-- `apps/web`, `packages/shared-types`: `pnpm test` (Vitest).
+- `frontend`, `frontend/src/schemas`: `pnpm test` (Vitest).
 - `backend/`: currently a stub (`npm test` always exits 1) — see
   docs/TASK_BREAKDOWN.md.
 
@@ -66,7 +66,7 @@ Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 ## Environment variables
 
 - `backend/.env.example` — copy to `backend/.env`, fill in real values.
-- `apps/web/.env.example` — copy to `apps/web/.env`.
+- `frontend/.env.example` — copy to `frontend/.env`.
 - Never commit a real `.env`.
 
 ## Do NOT
@@ -74,5 +74,5 @@ Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Don't restructure or delete anything under `backend/` without discussing
   it first — it's a teammate's already-merged, working code.
 - Don't hardcode `INTERNAL_API_KEY` or `JWT_SECRET`.
-- Don't bypass Zod validation in `apps/web`.
+- Don't bypass Zod validation in `frontend`.
 - Don't push directly to `main`.
