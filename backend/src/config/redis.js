@@ -21,10 +21,7 @@ function getRedisClient() {
       // Upstash requires TLS
       tls: {
         rejectUnauthorized: false
-      },
-      // For Upstash, we need to use the correct port
-      port: 6379,
-      host: 'knowing-sunbird-83863.upstash.io'
+      }
     });
 
     redisClient.on('connect', () => {

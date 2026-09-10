@@ -6,10 +6,10 @@ current contract and docs/ARCHITECTURE.md for why it's shaped this way.
 
 ## Backend (owns `backend/`)
 
-- [ ] Fix `backend/src/queue/producer.js` calling `getRedisClient()` at
+- [x] Fix `backend/src/queue/producer.js` calling `getRedisClient()` at
       module load — crashes `require('./app')` without `REDIS_URI` set
       (pre-existing, see ARCHITECTURE.md's "Known pre-existing issue").
-- [ ] `backend/src/utils/redisCache.js` calls `redis.get/setex/del` directly
+- [x] `backend/src/utils/redisCache.js` calls `redis.get/setex/del` directly
       on the module returned by `require('../config/redis')`, which exports
       `{ getRedisClient, closeRedis }`, not a client — this looks like it
       would throw the first time `getStats`'s cache path is hit. Worth a
