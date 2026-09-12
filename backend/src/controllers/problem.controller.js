@@ -30,6 +30,33 @@ const createProblem = async (req, res, next) => {
       });
     }
 
+    // Geofencing: Validate Jharkhand Location
+    const JHARKHAND_BOUNDS = { minLat: 21.5, maxLat: 25.8, minLng: 83.0, maxLng: 88.5 }; // slightly padded bounds
+    const JHARKHAND_DISTRICTS = [
+      'bokaro', 'chatra', 'deoghar', 'dhanbad', 'dumka', 'east singhbhum', 'garhwa',
+      'giridih', 'godda', 'gumla', 'hazaribagh', 'jamtara', 'khunti', 'koderma',
+      'latehar', 'lohardaga', 'pakur', 'palamu', 'ramgarh', 'ranchi', 'sahibganj',
+      'seraikela kharsawan', 'simdega', 'west singhbhum', 'pashchimi singhbhum', 
+      'purbi singhbhum', 'saraikela-kharsawan'
+    ];
+
+    const lat = parseFloat(location.lat);
+    const lng = parseFloat(location.lng);
+    const districtName = location.district.toLowerCase().trim();
+
+    const isInsideBounds = (lat >= JHARKHAND_BOUNDS.minLat && lat <= JHARKHAND_BOUNDS.maxLat && lng >= JHARKHAND_BOUNDS.minLng && lng <= JHARKHAND_BOUNDS.maxLng);
+    
+    // Check if the district string loosely matches any known Jharkhand district
+    const isValidDistrict = JHARKHAND_DISTRICTS.some(d => districtName.includes(d));
+
+    if (!isInsideBounds || !isValidDistrict) {
+      return res.status(403).json({
+        success: false,
+        message: 'Reports are currently only accepted from within the state of Jharkhand.',
+        rejected_location: { lat, lng, district: location.district }
+      });
+    }
+
     // Upload images to Cloudinary (if any)
     let uploadedImages = [];
     if (req.files && req.files.length > 0) {
