@@ -8,6 +8,7 @@ const {
   getStats,
 } = require('../controllers/problem.controller');
 const authMiddleware = require('../middleware/auth.middleware');
+const optionalAuthMiddleware = require('../middleware/optionalAuth.middleware');
 const rbacMiddleware = require('../middleware/rbac.middlewre');
 const upload = require('../middleware/upload.middleware');
 
@@ -22,9 +23,9 @@ router.post(
   createProblem
 );
 
-// All authenticated users
-router.get('/', authMiddleware, getProblems);
-router.get('/:id', authMiddleware, getProblemById);
+// All authenticated and unauthenticated users (Public feeds)
+router.get('/', optionalAuthMiddleware, getProblems);
+router.get('/:id', optionalAuthMiddleware, getProblemById);
 
 // Admin only
 router.put('/:id/assign',authMiddleware,rbacMiddleware(['admin']),assignProblem);

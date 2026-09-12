@@ -77,7 +77,10 @@ const getProblems = async (req, res, next) => {
     if (category) filter.category = category;
     if (district) filter['location.district'] = district;
     if (status) filter.status = status;
-    if (submitted_by === 'me' && req.user) {
+    if (submitted_by === 'me') {
+      if (!req.user) {
+        return res.status(401).json({ success: false, message: 'Login required to view your reports' });
+      }
       filter.submitted_by = req.user.id;
     } else if (submitted_by) {
       filter.submitted_by = submitted_by;
